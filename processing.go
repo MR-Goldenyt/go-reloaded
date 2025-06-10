@@ -7,7 +7,6 @@ import (
 )
 
 func Gettext(input string) string {
-
 	filename := input
 
 	// if only filename is given then it turns it into a relative path
