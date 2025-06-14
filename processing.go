@@ -4,7 +4,59 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"regexp"
+	"strconv"
+	"strings"
+	"unicode"
 )
+
+func Format(InputFile string, OutputFile string) {
+	// validates if input file is .txt
+	if InputFile[len(InputFile)-4:] != ".txt" {
+		fmt.Println("Error: Invalid input filename. (Should be a .txt file)")
+		fmt.Println("No content read. Aborting.")
+		return
+	}
+	// validates if output file is .txt
+	if OutputFile[len(OutputFile)-4:] != ".txt" {
+		fmt.Println("Error: Invalid output filename. (Should be a .txt file)")
+		fmt.Println("No content read. Aborting.")
+		return
+	}
+
+	// display error if the file doesnt exist
+	_, err := os.Stat(InputFile)
+	if err != nil || os.IsNotExist(err) {
+		fmt.Println("Error: " + InputFile + ": The system cannot find the file specified.")
+		fmt.Println("No content read. Aborting.")
+		return
+	}
+
+	text := Gettext(InputFile)
+	// display error if file is empty
+	if text == "" {
+		fmt.Println("Error: Empty input file.\nNo content read. Aborting.")
+		return
+	}
+	// exit if there are unsupported ascii characters7
+	for _, v := range text {
+		if (v < 32 && v != 9 && v != 10 && v != 13) || v > 126 {
+			fmt.Println("Error unsupported input: illegal characters found.\nPlease enter valid ascii characters.\nNo content read. Aborting.")
+			return
+		}
+	}
+
+	words := DetectCase(TokenizeInput(text))
+	// fmt.Println(fmt.Sprintf("%#v\n", TokenizeInput(text)))
+	if words == nil {
+		fmt.Println("No content read. Aborting.")
+		return
+	}
+
+	str := FormatText((JoinStrings(words, " ")))
+
+	WriteStringToFile(OutputFile, str)
+}
 
 func Gettext(input string) string {
 	filename := input
@@ -17,7 +69,6 @@ func Gettext(input string) string {
 	// read from the file
 	file, err := os.Open(filename)
 	if err != nil {
-		fmt.Println("Error opening file:", err)
 		return ""
 	}
 	defer file.Close()
@@ -36,150 +87,124 @@ func Gettext(input string) string {
 	return content
 }
 
-func SplitWhiteSpaces(s string) []string {
-	runes := []rune(s)
-	result := []string{}
-	word := ""
-	length := len(runes)
+// func SplitWhiteSpaces(s string) []string {
+// 	runes := []rune(s)
+// 	result := []string{}
+// 	word := ""
+// 	length := len(runes)
 
-	for i := 0; i < length; i++ {
-		char := runes[i]
+// 	for i := 0; i < length; i++ {
+// 		char := runes[i]
 
-		// Handle whitespace (space, tab, carriage return)
-		if char == ' ' || char == '\t' || char == '\r' {
-			if word != "" {
-				result = append(result, word)
-				word = ""
-			}
-			continue
-		}
+// 		// Handle whitespace (space, tab, carriage return)
+// 		if char == ' ' || char == '\t' || char == '\r' {
+// 			if word != "" {
+// 				result = append(result, word)
+// 				word = ""
+// 			}
+// 			continue
+// 		}
 
-		// Handle newline as a separate word
-		if char == '\n' {
-			if word != "" {
-				result = append(result, word)
-				word = ""
-			}
-			result = append(result, "\n")
-			continue
-		}
+// 		// Handle newline as a separate word
+// 		if char == '\n' {
+// 			if word != "" {
+// 				result = append(result, word)
+// 				word = ""
+// 			}
+// 			result = append(result, "\n")
+// 			continue
+// 		}
 
-		// Handle special cases like (cap), (low), (cap, 3), etc.
-		if char == '(' {
-			start := i
-			j := i
-			for j < length && runes[j] != ')' {
-				j++
-			}
-			if j < length && runes[j] == ')' {
-				group := string(runes[start : j+1])
-				if IsSpecialCase(group) {
-					if word != "" {
-						result = append(result, word)
-						word = ""
-					}
-					result = append(result, group)
-					i = j // Move i to closing parenthesis so next loop iteration starts after it
-					continue
-				}
-			}
-		}
+// 		// Regular character accumulation
+// 		word += string(char)
+// 	}
 
-		// Regular character accumulation
-		word += string(char)
+// 	if word != "" {
+// 		result = append(result, word)
+// 	}
+
+// 	return result
+// }
+
+func TokenizeInput(input string) []string {
+	// Pattern explanation:
+	// (?i) - case-insensitive
+	// (\([ \t\r]*(?:up|low|cap|bin|hex)[ \t\r]*(?:,[ \t\r]*-?\d+)?[ \t\r]*\)+) - special keywords with optional signed number and multiple trailing )
+	// |(\n) - newline tokenized as "\n"
+	// |([^\s]+) - any non-whitespace sequence
+	pattern := `(?i)(\([ \t\r]*(?:up|low|cap|bin|hex)[ \t\r]*(?:,[ \t\r]*-?\d+)?[ \t\r]*\)+)|(\n)|([^\s]+)`
+
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		fmt.Println("Regex compilation error:", err)
+		return nil
 	}
 
-	if word != "" {
-		result = append(result, word)
-	}
-
-	return result
+	matches := re.FindAllString(input, -1)
+	return matches
 }
 
-func IsSpecialCase(s string) bool {
-	// Check exact special cases without number
-	if s == "(low)" || s == "(up)" || s == "(cap)" {
-		return true
+func ParseSpecialKeyword(s string) (string, int, bool) {
+	s = strings.TrimSpace(s)
+
+	// Must start with '(' and end with ')', and only one pair
+	if !strings.HasPrefix(s, "(") || !strings.HasSuffix(s, ")") {
+		return "", 1, false
 	}
 
-	// Check for special cases with numbers
-	if len(s) >= 7 && (s[:5] == "(low," || s[:5] == "(cap," || s[:4] == "(up,") {
-		// Ensure last character is ')'
-		if s[len(s)-1] == ')' {
-			// Look for space after comma
-			for i := 0; i < len(s)-1; i++ {
-				if s[i] == ' ' {
-					digits := s[i+1 : len(s)-1]
-					// Check all digits in substring
-					for _, ch := range digits {
-						if ch < '0' || ch > '9' {
-							return false
-						}
-					}
-					return true
-				}
+	// Ensure no outer text like (((cap)))
+	if strings.Count(s, "(") != 1 || strings.Count(s, ")") != 1 {
+		return "", 1, false
+	}
+
+	inner := strings.TrimSpace(s[1 : len(s)-1])
+	parts := strings.Split(strings.ReplaceAll(inner, " ", ""), ",")
+
+	if len(parts) < 1 {
+		return "", 1, false
+	}
+
+	keyword := strings.ToLower(parts[0])
+
+	switch keyword {
+	case "up", "low", "cap":
+		count := 1
+		if len(parts) == 2 {
+			n, ok := strconv.Atoi(parts[1])
+			if ok == nil {
+				count = n
 			}
 		}
-	}
-
-	return false
-}
-
-func parseSpecialCase(s string) (string, int) {
-	// No number
-	if s == "(low)" {
-		return "low", 1
-	} else if s == "(up)" {
-		return "up", 1
-	} else if s == "(cap)" {
-		return "cap", 1
-	}
-
-	// With number
-	var caseType string
-	var start int
-
-	if s[:5] == "(low," {
-		caseType = "low"
-		start = 5
-	} else if s[:5] == "(cap," {
-		caseType = "cap"
-		start = 5
-	} else if s[:4] == "(up," {
-		caseType = "up"
-		start = 4
-	}
-
-	// Find space
-	space := -1
-	for i := start; i < len(s)-1; i++ {
-		if s[i] == ' ' {
-			space = i
-			break
+		return keyword, count, true
+	case "hex", "bin":
+		if len(parts) == 1 {
+			return keyword, 1, true
 		}
 	}
-
-	if space == -1 {
-		return caseType, 1
-	}
-
-	// Extract number
-	num := 0
-	for i := space + 1; i < len(s)-1; i++ {
-		ch := s[i]
-		if ch >= '0' && ch <= '9' {
-			num = num*10 + int(ch-'0')
-		} else {
-			return caseType, 1
-		}
-	}
-
-	if num <= 0 {
-		num = 1
-	}
-
-	return caseType, num
+	return "", 1, false
 }
+
+// func isValidSurrounding(s string) bool {
+// 	s = strings.TrimSpace(s)
+// 	if len(s) < 4 || s[0] != '(' || s[len(s)-1] != ')' {
+// 		return false
+// 	}
+
+// 	// Ensure no touching non-space chars outside the parentheses
+// 	// ( e.g, "fox(cap)" should be invalid )
+// 	// This is handled earlier by tokenization (splitwhitespace)
+
+// 	inner := strings.TrimSpace(s[1 : len(s)-1])
+// 	innerLower := strings.ToLower(strings.Split(inner, ",")[0])
+// 	return innerLower == "up" || innerLower == "low" || innerLower == "cap"
+// }
+
+// func IsSpecialCase(s string) bool {
+// 	if _, _, valid := ParseSpecialKeyword(s); !valid {
+// 		return false
+// 	}
+// 	return true
+// }
 
 func StartsWithVowel(s string) bool {
 	if s == "" {
@@ -190,89 +215,22 @@ func StartsWithVowel(s string) bool {
 		first == 'a' || first == 'e' || first == 'i' || first == 'o' || first == 'u'
 }
 
-func IntToString(n int) string {
-	if n == 0 {
-		return "0"
+func HexToDec(input string) string {
+	dec, err := strconv.ParseInt(input, 16, 64)
+	if err != nil {
+		fmt.Printf("Error: Invalid hexadecimal number: %v\n\n", input)
+		return ""
 	}
-
-	digits := []byte{}
-
-	// Extract digits in reverse order
-	for n > 0 {
-		digit := n % 10
-		digits = append(digits, byte(digit)+'0')
-		n /= 10
-	}
-
-	// Reverse the slice to get correct order
-	i := 0
-	j := len(digits) - 1
-
-	for i < j {
-		digits[i], digits[j] = digits[j], digits[i]
-		i++
-		j--
-	}
-
-	return string(digits)
+	return fmt.Sprintf("%d", dec)
 }
 
-func HexToDecimalString(s string) string {
-	result := 0
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		var val int
-		if c >= '0' && c <= '9' {
-			val = int(c - '0')
-		} else if c >= 'a' && c <= 'f' {
-			val = int(c - 'a' + 10)
-		} else if c >= 'A' && c <= 'F' {
-			val = int(c - 'A' + 10)
-		} else {
-			break // invalid char
-		}
-		result = result*16 + val
+func BinToDec(input string) string {
+	dec, err := strconv.ParseInt(input, 2, 64)
+	if err != nil {
+		fmt.Printf("Error: Invalid binary number: %v\n\n", input)
+		return ""
 	}
-	return IntToString(result)
-}
-
-func BinToDecimalString(s string) string {
-	result := 0
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c == '0' {
-			result = result * 2
-		} else if c == '1' {
-			result = result*2 + 1
-		} else {
-			break // invalid char
-		}
-	}
-	return IntToString(result)
-}
-
-func ToLower(s string) string {
-	str := ""
-	for _, v := range s {
-		if v >= 'A' && v <= 'Z' {
-			str += string(v + 32)
-		} else {
-			str += string(v)
-		}
-	}
-	return str
-}
-
-func ToUpper(s string) string {
-	str := ""
-	for _, v := range s {
-		if v >= 97 && v <= 122 {
-			str += string(v - 32)
-		} else {
-			str += string(v)
-		}
-	}
-	return str
+	return fmt.Sprintf("%d", dec)
 }
 
 func Capitalize(s string) string {
@@ -299,6 +257,103 @@ func Capitalize(s string) string {
 	return string(runes)
 }
 
+// func isPunctuation(r rune) bool {
+// 	// Treat common punctuation marks as quote closers
+// 	punctuations := []rune{'.', ',', '!', '?', ':', ';', '-', '(', ')', '"'}
+// 	for _, p := range punctuations {
+// 		if r == p {
+// 			return true
+// 		}
+// 	}
+// 	return false
+// }
+
+func Handlequotes(s string) string {
+	var result strings.Builder
+	inQuote := false
+	var quoteContent strings.Builder
+
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+
+		if ch == '\'' {
+			before := byte(' ')
+			after := byte(' ')
+			if i > 0 {
+				before = s[i-1]
+			}
+			if i+1 < len(s) {
+				after = s[i+1]
+			}
+
+			// Contraction check: treat as apostrophe if surrounded by non-space
+			if !unicode.IsSpace(rune(before)) && !unicode.IsSpace(rune(after)) {
+				if inQuote {
+					quoteContent.WriteByte(ch)
+				} else {
+					result.WriteByte(ch)
+				}
+				continue
+			}
+
+			// If not in quote and next char is also quote treat as empty quote pair
+			if !inQuote {
+				for i+1 < len(s) && s[i] == '\'' && s[i+1] == '\'' {
+					result.WriteString("'' ")
+					i += 2
+				}
+
+				// If the loop exited with a lone single quote (odd number of quotes), handle normally
+				if i < len(s) && s[i] == '\'' {
+					inQuote = true
+					continue
+				}
+
+				// Skip this loop iteration since we've already handled the quote(s)
+				continue
+			}
+
+			// Otherwise, normal quote handling
+			if inQuote {
+				trimmed := strings.TrimSpace(quoteContent.String())
+				result.WriteByte('\'')
+				result.WriteString(trimmed)
+				result.WriteByte('\'')
+				if len(trimmed) == 0 {
+					result.WriteByte(' ')
+				}
+				quoteContent.Reset()
+				inQuote = false
+
+				for i+1 < len(s)-1 && s[i+1] == '\'' && s[i+2] == '\'' {
+					result.WriteString("'' ")
+					i += 2
+				}
+
+				continue
+			} else {
+				inQuote = true
+				continue
+			}
+
+		}
+
+		if inQuote {
+			quoteContent.WriteByte(ch)
+		} else {
+			result.WriteByte(ch)
+		}
+	}
+
+	// Handle unclosed quote
+	if inQuote {
+		result.WriteByte('\'')
+		result.WriteString(quoteContent.String())
+	}
+
+	return result.String()
+}
+
 func FormatText(input string) string {
 	runes := []rune(input)
 	punctuation := map[rune]bool{
@@ -307,7 +362,6 @@ func FormatText(input string) string {
 
 	var result []rune
 	i := 0
-	length := len(runes)
 
 	for i < len(runes) {
 		// Handle newline correctly
@@ -323,37 +377,6 @@ func FormatText(input string) string {
 				i++
 			}
 			continue
-		}
-
-		// Handle single-quoted expressions
-		if runes[i] == '\'' {
-			i++
-			contentStart := i
-			for i < length && runes[i] != '\'' {
-				i++
-			}
-			contentEnd := i
-			if i < length && runes[i] == '\'' {
-				// Trim leading spaces
-				for contentStart < contentEnd && runes[contentStart] == ' ' {
-					contentStart++
-				}
-				// Trim trailing spaces
-				for contentEnd > contentStart && runes[contentEnd-1] == ' ' {
-					contentEnd--
-				}
-				result = append(result, '\'')
-				for j := contentStart; j < contentEnd; j++ {
-					result = append(result, runes[j])
-				}
-				result = append(result, '\'')
-				i++ // move past closing quote
-				continue
-			} else {
-				// No closing quote found, treat as normal character
-				result = append(result, '\'')
-				continue
-			}
 		}
 
 		// Handle punctuation group
@@ -386,56 +409,58 @@ func FormatText(input string) string {
 		result = result[:len(result)-1]
 	}
 
+	// Handle punctuations
+	result = []rune(Handlequotes(string(result)))
+
 	return string(result)
 }
 
 func DetectCase(words []string) []string {
-	result := []string{}
-	length := len(words)
+	var result []string
+	lineStart := 0
 
-	for i := 0; i < length; i++ {
+	for i := 0; i < len(words); i++ {
 		word := words[i]
-
-		// Handle special cases
-		if IsSpecialCase(word) {
-			caseType, count := parseSpecialCase(word)
-
-			// Apply transformation to previous `count` words
-			n := len(result)
-			start := n - count
-			if start < 0 {
-				start = 0
+		keyword, count, valid := ParseSpecialKeyword(word)
+		if valid && count > 0 {
+			start := len(result) - count
+			if start < lineStart {
+				start = lineStart
 			}
-
-			for j := start; j < n; j++ {
-				switch caseType {
-				case "low":
-					result[j] = ToLower(result[j])
+			for j := start; j < len(result); j++ {
+				switch keyword {
 				case "up":
-					result[j] = ToUpper(result[j])
+					result[j] = strings.ToUpper(result[j])
+				case "low":
+					result[j] = strings.ToLower(result[j])
 				case "cap":
 					result[j] = Capitalize(result[j])
+				case "hex":
+					trimmed := strings.TrimSpace(result[j])
+					if trimmed != "" {
+						if converted := HexToDec(trimmed); valid {
+							result[j] = converted
+						}
+					}
+				case "bin":
+					trimmed := strings.TrimSpace(result[j])
+					if trimmed != "" {
+						if converted := BinToDec(trimmed); valid {
+							result[j] = converted
+						}
+
+					}
 				}
+
 			}
-			// Do not add the special case to the result
+			continue // skip appending keyword itself
+		} else if valid && count < 1 {
+			fmt.Println("Error: [(" + keyword + ", " + strconv.Itoa(count) + ")]: " + strconv.Itoa(count) + " is an invalid number\nPlease enter a number equal to or greater than 1")
 			continue
 		}
-		// Handle Hex to decimal conversion
-		if word == "(hex)" {
-			if len(result) > 0 {
-				result[len(result)-1] = HexToDecimalString(result[len(result)-1])
-			}
-			continue
-		}
-		// Handle binary to decimal conversion
-		if word == "(bin)" {
-			if len(result) > 0 {
-				result[len(result)-1] = BinToDecimalString(result[len(result)-1])
-			}
-			continue
-		}
+
 		// Handle "A" or "An" and fix based on next word's first letter
-		if (word == "A" || word == "An" || word == "AN" || word == "a" || word == "an") && i+1 < length {
+		if (word == "A" || word == "An" || word == "AN" || word == "a" || word == "an") && i+1 < len(words) {
 			nextWord := words[i+1]
 			if StartsWithVowel(nextWord) && word == "A" {
 				word = "An"
@@ -449,8 +474,12 @@ func DetectCase(words []string) []string {
 		}
 
 		result = append(result, word)
-	}
 
+		// Update lineStart index after newline token
+		if word == "\n" {
+			lineStart = len(result)
+		}
+	}
 	return result
 }
 
@@ -459,8 +488,14 @@ func JoinStrings(slice []string, sep string) string {
 	for i := 0; i < len(slice); i++ {
 		result += slice[i]
 
-		if i < len(slice)-1 && slice[i] != "\n" && slice[i+1] != "\n" {
-			result += sep
+		if i < len(slice)-1 {
+			curr := slice[i]
+			next := slice[i+1]
+
+			// Skip adding separator if newline or matching parens
+			if curr != "\n" && next != "\n" && !(strings.HasSuffix(curr, "(") && strings.HasPrefix(next, ")")) {
+				result += sep
+			}
 		}
 	}
 	return result
@@ -477,16 +512,4 @@ func WriteStringToFile(filename string, data string) error {
 	// Write the string data to the file
 	_, err = file.WriteString(data)
 	return err
-}
-
-func Format(InputFile string, OutputFile string) {
-	text := Gettext(InputFile)
-	if text == "" {
-		fmt.Println("No content read. Aborting.")
-		return
-	}
-
-	words := DetectCase(SplitWhiteSpaces(Gettext(InputFile)))
-	str := FormatText(JoinStrings(words, " "))
-	WriteStringToFile(OutputFile, str)
 }
