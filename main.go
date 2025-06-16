@@ -3,8 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
-	"piscine"
 	"strconv"
+
+	process "textformatter/processor"
 )
 
 func main() {
@@ -15,5 +16,5 @@ func main() {
 	InputFile := os.Args[1]
 	OutputFile := os.Args[2]
 
-	piscine.Format(InputFile, OutputFile)
+	process.Format(InputFile, OutputFile)
 }
