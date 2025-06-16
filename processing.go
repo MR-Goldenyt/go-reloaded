@@ -11,6 +11,13 @@ import (
 )
 
 func Format(InputFile string, OutputFile string) {
+	//validate length atleast 5 or more
+	if len(InputFile) < 5 || len(OutputFile) < 5 {
+		fmt.Println("Error: Invalid input filename. (Should be a .txt file)")
+		fmt.Println("No content read. Aborting.")
+		return
+	}
+
 	// validates if input file is .txt
 	if InputFile[len(InputFile)-4:] != ".txt" {
 		fmt.Println("Error: Invalid input filename. (Should be a .txt file)")
@@ -270,85 +277,99 @@ func Capitalize(s string) string {
 
 func Handlequotes(s string) string {
 	var result strings.Builder
-	inQuote := false
-	var quoteContent strings.Builder
 
-	for i := 0; i < len(s); i++ {
-		ch := s[i]
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		str := line
+		length := len(str)
+		prevWasQuoteCluster := false
+		inQuote := false
+		var quoteString strings.Builder
 
-		if ch == '\'' {
-			before := byte(' ')
-			after := byte(' ')
-			if i > 0 {
-				before = s[i-1]
-			}
-			if i+1 < len(s) {
-				after = s[i+1]
-			}
-
-			// Contraction check: treat as apostrophe if surrounded by non-space
-			if !unicode.IsSpace(rune(before)) && !unicode.IsSpace(rune(after)) {
+		for j := 0; j < length; j++ {
+			// contraction: single quote with non-space before and after
+			if j > 0 && j < length-1 && str[j] == '\'' &&
+				!unicode.IsSpace(rune(str[j-1])) && !unicode.IsSpace(rune(str[j+1])) {
 				if inQuote {
-					quoteContent.WriteByte(ch)
+					quoteString.WriteByte('\'')
 				} else {
-					result.WriteByte(ch)
+					result.WriteByte('\'')
 				}
+				prevWasQuoteCluster = false
 				continue
 			}
 
-			// If not in quote and next char is also quote treat as empty quote pair
-			if !inQuote {
-				for i+1 < len(s) && s[i] == '\'' && s[i+1] == '\'' {
-					result.WriteString("'' ")
-					i += 2
+			if str[j] == '\'' {
+				if !inQuote {
+					// count consecutive quotes
+					start := j
+					for j < length && str[j] == '\'' {
+						j++
+					}
+					count := j - start
+					pairs := count / 2
+					dangling := count % 2
+
+					// space between clusters
+					if prevWasQuoteCluster {
+						result.WriteByte(' ')
+					}
+
+					// write pairs
+					for p := 0; p < pairs; p++ {
+						if p > 0 {
+							result.WriteByte(' ')
+						}
+						result.WriteString("''")
+					}
+
+					// dangling starts non-empty or stays as dangling
+					if dangling == 1 {
+						if pairs > 0 {
+							result.WriteByte(' ')
+						}
+						// look ahead: if not at end and next char is not quote -> it's a non-empty start
+						if j < length && str[j] != '\'' {
+							inQuote = true
+							quoteString.Reset()
+						} else {
+							result.WriteByte('\'')
+						}
+					}
+
+					prevWasQuoteCluster = true
+					j-- // adjust
+				} else {
+					// closing non-empty
+					trimmed := strings.TrimSpace(quoteString.String())
+					result.WriteByte('\'')
+					result.WriteString(trimmed)
+					result.WriteByte('\'')
+					inQuote = false
+					quoteString.Reset()
+					prevWasQuoteCluster = true
 				}
-
-				// If the loop exited with a lone single quote (odd number of quotes), handle normally
-				if i < len(s) && s[i] == '\'' {
-					inQuote = true
-					continue
-				}
-
-				// Skip this loop iteration since we've already handled the quote(s)
-				continue
-			}
-
-			// Otherwise, normal quote handling
-			if inQuote {
-				trimmed := strings.TrimSpace(quoteContent.String())
-				result.WriteByte('\'')
-				result.WriteString(trimmed)
-				result.WriteByte('\'')
-				if len(trimmed) == 0 {
-					result.WriteByte(' ')
-				}
-				quoteContent.Reset()
-				inQuote = false
-
-				for i+1 < len(s)-1 && s[i+1] == '\'' && s[i+2] == '\'' {
-					result.WriteString("'' ")
-					i += 2
-				}
-
-				continue
 			} else {
-				inQuote = true
-				continue
+				// normal char
+				if inQuote {
+					quoteString.WriteByte(str[j])
+				} else {
+					result.WriteByte(str[j])
+					prevWasQuoteCluster = false
+				}
 			}
-
 		}
 
+		// unclosed quote
 		if inQuote {
-			quoteContent.WriteByte(ch)
-		} else {
-			result.WriteByte(ch)
+			trimmed := strings.TrimSpace(quoteString.String())
+			result.WriteByte('\'')
+			result.WriteString(trimmed)
 		}
-	}
 
-	// Handle unclosed quote
-	if inQuote {
-		result.WriteByte('\'')
-		result.WriteString(quoteContent.String())
+		if i < len(lines)-1 {
+			result.WriteByte('\n')
+		}
 	}
 
 	return result.String()
