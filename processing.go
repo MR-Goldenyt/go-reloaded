@@ -11,9 +11,14 @@ import (
 )
 
 func Format(InputFile string, OutputFile string) {
-	//validate length atleast 5 or more
-	if len(InputFile) < 5 || len(OutputFile) < 5 {
+	// validate argument length atleast 5 or more
+	if len(InputFile) < 5 {
 		fmt.Println("Error: Invalid input filename. (Should be a .txt file)")
+		fmt.Println("No content read. Aborting.")
+		return
+	}
+	if len(OutputFile) < 5 {
+		fmt.Println("Error: Invalid output filename. (Should be a .txt file)")
 		fmt.Println("No content read. Aborting.")
 		return
 	}
@@ -469,10 +474,8 @@ func DetectCase(words []string) []string {
 						if converted := BinToDec(trimmed); valid {
 							result[j] = converted
 						}
-
 					}
 				}
-
 			}
 			continue // skip appending keyword itself
 		} else if valid && count < 1 {
