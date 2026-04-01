@@ -47,7 +47,7 @@ func Format(InputFile string, OutputFile string) {
 		return
 	}
 
-	text := input.Gettext(InputFile)
+	text := transform.FormatText(input.Gettext(InputFile))
 	// display error if file is empty
 	if text == "" {
 		fmt.Println("Error: Empty input file.\nNo content read. Aborting.")
@@ -60,7 +60,7 @@ func Format(InputFile string, OutputFile string) {
 			return
 		}
 	}
-
+	
 	words := utilities.DetectCase(utilities.TokenizeInput(text))
 	// fmt.Println(fmt.Sprintf("%#v\n", TokenizeInput(text)))
 	if words == nil {
@@ -68,7 +68,7 @@ func Format(InputFile string, OutputFile string) {
 		return
 	}
 
-	str := transform.FormatText((utilities.JoinStrings(words, " ")))
+	str := utilities.JoinStrings(words, " ")
 
 	output.WriteStringToFile(OutputFile, str)
 }
